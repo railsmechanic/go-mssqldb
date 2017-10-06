@@ -69,7 +69,6 @@ func (w *tdsBuffer) flush() (err error) {
 	binary.BigEndian.PutUint16(w.wbuf[2:], uint16(w.wpos))
 	w.wbuf[6] = w.wPacketSeq
 
-	// Write packet into underlying transport.
 	if _, err = w.transport.Write(w.wbuf[:w.wpos]); err != nil {
 		return err
 	}

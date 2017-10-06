@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// timeoutConn may write to different outputs over the course of a normal
+// connection. Initially buf is nil and the c net.Conn is used to transfer
+// pre-login packets. Before TLS takes over buf is assigned to and the TLS
+// negotiation happens. Once TLS is established TLS replaces the external
+// TDS buffer and the internal buf in timeoutConn is set to nil.
 type timeoutConn struct {
 	c             net.Conn
 	timeout       time.Duration
@@ -22,56 +27,53 @@ func NewTimeoutConn(conn net.Conn, timeout time.Duration) *timeoutConn {
 }
 
 func (c *timeoutConn) Read(b []byte) (n int, err error) {
-	if c.buf != nil {
-		if c.packetPending {
-			c.packetPending = false
-			err = c.buf.FinishPacket()
-			if err != nil {
-				err = fmt.Errorf("Cannot send handshake packet: %s", err.Error())
-				return
-			}
-			c.continueRead = false
-		}
-		if !c.continueRead {
-			var packet packetType
-			packet, err = c.buf.BeginRead()
-			if err != nil {
-				err = fmt.Errorf("Cannot read handshake packet: %s", err.Error())
-				return
-			}
-			if packet != packPrelogin {
-				err = fmt.Errorf("unexpected packet %d, expecting prelogin", packet)
-				return
-			}
-			c.continueRead = true
-		}
-		n, err = c.buf.Read(b)
-		return
-	}
-	err = c.c.SetDeadline(time.Now().Add(c.timeout))
-	if err != nil {
-		return
-	}
-	return c.c.Read(b)
-}
-
-func (c *timeoutConn) Write(b []byte) (n int, err error) {
-	if c.buf != nil {
-		if !c.packetPending {
-			c.buf.BeginPacket(packPrelogin)
-			c.packetPending = true
-		}
-		n, err = c.buf.Write(b)
+	if c.buf == nil {
+		err = c.c.SetReadDeadline(time.Now().Add(c.timeout))
 		if err != nil {
 			return
 		}
-		return
+		return c.c.Read(b)
 	}
-	err = c.c.SetDeadline(time.Now().Add(c.timeout))
-	if err != nil {
-		return
+	if c.packetPending {
+		c.packetPending = false
+		err = c.buf.FinishPacket()
+		if err != nil {
+			err = fmt.Errorf("Cannot send handshake packet: %s", err.Error())
+			return
+		}
+		c.continueRead = false
 	}
-	return c.c.Write(b)
+	if !c.continueRead {
+		var packet packetType
+		packet, err = c.buf.BeginRead()
+		if err != nil {
+			err = fmt.Errorf("Cannot read handshake packet: %s", err.Error())
+			return
+		}
+		if packet != packPrelogin {
+			err = fmt.Errorf("unexpected packet %d, expecting prelogin", packet)
+			return
+		}
+		c.continueRead = true
+	}
+	n, err = c.buf.Read(b)
+	return
+}
+
+func (c *timeoutConn) Write(b []byte) (n int, err error) {
+	if c.buf == nil {
+		err = c.c.SetWriteDeadline(time.Now().Add(c.timeout))
+		if err != nil {
+			return
+		}
+		return c.c.Write(b)
+	}
+	if !c.packetPending {
+		c.buf.BeginPacket(packPrelogin)
+		c.packetPending = true
+	}
+	n, err = c.buf.Write(b)
+	return
 }
 
 func (c timeoutConn) Close() error {
