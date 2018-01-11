@@ -22,6 +22,11 @@ import (
 	"golang.org/x/net/context" // use the "x/net/context" for backwards compatibility.
 )
 
+// ParseConnectParams can be used to validate a connection string
+func ParseConnectParams(dsn string) (connectParams, error) {
+	return parseConnectParams(dsn)
+}
+
 func parseInstances(msg []byte) map[string]map[string]string {
 	results := map[string]map[string]string{}
 	if len(msg) > 3 && msg[0] == 5 {
